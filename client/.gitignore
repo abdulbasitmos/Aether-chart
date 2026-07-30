@@ -1,0 +1,54 @@
+# =============================
+# Node / npm
+# =============================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+.npmrc
+
+# =============================
+# Build output
+# =============================
+dist/
+dist-ssr/
+build/
+
+# =============================
+# Environment & secrets
+# =============================
+.env
+.env.local
+.env.*.local
+
+# =============================
+# Vite & tooling cache
+# =============================
+*.local
+.vite/
+
+# =============================
+# Editor directories
+# =============================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# =============================
+# OS files
+# =============================
+.DS_Store
+Thumbs.db
+
+# =============================
+# Logs
+# =============================
+logs/
+*.log
