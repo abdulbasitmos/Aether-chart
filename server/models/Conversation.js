@@ -10,6 +10,7 @@ const ConversationSchema = new mongoose.Schema({
   admins: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   onlyAdminsCanMessage: { type: Boolean, default: false },
   pinnedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  pinnedMessageId: { type: mongoose.Schema.Types.ObjectId, ref: 'Message', default: null }, // Currently pinned message in this conversation
   favoritedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   archivedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   mutedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],

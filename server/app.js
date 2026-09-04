@@ -57,115 +57,168 @@ app.use('/uploads', express.static(uploadDir));
 // Path to production client build
 const distPath = path.join(__dirname, '..', 'client', 'dist');
 
-// Middleware to fail fast if database is disconnected
+// Health check endpoints (exempt from DB check so monitoring and Render health checks succeed)
+app.get(['/health', '/api/health'], (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  res.status(200).json({
+    status: isDbConnected ? 'healthy' : 'degraded',
+    service: 'aether-chat-backend',
+    database: isDbConnected ? 'connected' : 'disconnected',
+    databaseState: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Middleware to fail fast if database is disconnected (exempting /api/health)
 app.use('/api', (req, res, next) => {
+  if (req.path === '/health') return next();
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({
-      error: 'Database connection is not established. Please check server logs and configuration.'
+      error: 'Database connection is not established. Please check server logs and configuration.',
+      tip: 'Ensure MONGODB_URI is set in Render environment variables and 0.0.0.0/0 is whitelisted in MongoDB Atlas Network Access.'
     });
   }
   next();
 });
 
-// MongoDB Connection
+// MongoDB Connection with auto-reconnection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/aetherchat';
-mongoose.connect(MONGODB_URI, {
-  serverSelectionTimeoutMS: 15000,
-  socketTimeoutMS: 45000,
-  retryWrites: true,
-  maxPoolSize: 10
-})
-  .then(async () => {
-    console.log('Successfully connected to MongoDB.');
-    
-    // Auto-seed support admin account
-    await seedSupportAccount();
-    
-    // Start task reminder checker only after DB is connected
-    setInterval(async () => {
-      try {
-        const startOfToday = new Date();
-        startOfToday.setHours(0,0,0,0);
-        const endOfToday = new Date();
-        endOfToday.setHours(23,59,59,999);
 
-        // 1. Tasks Due Today
-        const dueTodayTasks = await Task.find({
-          dueDate: { $gte: startOfToday, $lte: endOfToday },
-          status: { $ne: 'Completed' }
-        });
+let taskReminderStarted = false;
+function startTaskReminderChecker() {
+  if (taskReminderStarted) return;
+  taskReminderStarted = true;
+  setInterval(async () => {
+    try {
+      if (mongoose.connection.readyState !== 1) return;
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
 
-        for (const task of dueTodayTasks) {
-          if (task.assignedTo) {
-            const exists = await Notification.findOne({
+      // 1. Tasks Due Today
+      const dueTodayTasks = await Task.find({
+        dueDate: { $gte: startOfToday, $lte: endOfToday },
+        status: { $ne: 'Completed' }
+      });
+
+      for (const task of dueTodayTasks) {
+        if (task.assignedTo) {
+          const exists = await Notification.findOne({
+            userId: task.assignedTo,
+            type: 'task_due_today',
+            taskId: task._id,
+            createdAt: { $gte: startOfToday }
+          });
+          if (!exists) {
+            const notif = new Notification({
               userId: task.assignedTo,
               type: 'task_due_today',
-              taskId: task._id,
-              createdAt: { $gte: startOfToday }
-            });
-            if (!exists) {
-              const notif = new Notification({
-                userId: task.assignedTo,
-                type: 'task_due_today',
-                title: 'Task Due Today',
-                content: `Reminder: Your assigned task "${task.title}" is due today.`,
-                taskId: task._id
-              });
-              await notif.save();
-              
-              const socketId = activeSockets.get(task.assignedTo.toString());
-              if (socketId) {
-                io.to(socketId).emit('taskReminder', { task, type: 'due_today', notification: notif });
-              }
-            }
-          }
-        }
-
-        // 2. Overdue Tasks
-        const overdueTasks = await Task.find({
-          dueDate: { $lt: startOfToday },
-          status: { $ne: 'Completed' }
-        });
-
-        for (const task of overdueTasks) {
-          if (task.assignedTo) {
-            const exists = await Notification.findOne({
-              userId: task.assignedTo,
-              type: 'task_overdue',
+              title: 'Task Due Today',
+              content: `Reminder: Your assigned task "${task.title}" is due today.`,
               taskId: task._id
             });
-            if (!exists) {
-              const notif = new Notification({
-                userId: task.assignedTo,
-                type: 'task_overdue',
-                title: 'Task Overdue âš ï¸',
-                content: `Alert: Your assigned task "${task.title}" is overdue.`,
-                taskId: task._id
-              });
-              await notif.save();
+            await notif.save();
 
-              const socketId = activeSockets.get(task.assignedTo.toString());
-              if (socketId) {
-                io.to(socketId).emit('taskReminder', { task, type: 'overdue', notification: notif });
-              }
+            const socketId = activeSockets.get(task.assignedTo.toString());
+            if (socketId) {
+              io.to(socketId).emit('taskReminder', { task, type: 'due_today', notification: notif });
             }
           }
         }
-      } catch (err) {
-        console.error('Error checking due/overdue tasks:', err);
       }
-    }, 6 * 60 * 60 * 1000); // Check every 6 hours
-  })
-  .catch(err => {
+
+      // 2. Overdue Tasks
+      const overdueTasks = await Task.find({
+        dueDate: { $lt: startOfToday },
+        status: { $ne: 'Completed' }
+      });
+
+      for (const task of overdueTasks) {
+        if (task.assignedTo) {
+          const exists = await Notification.findOne({
+            userId: task.assignedTo,
+            type: 'task_overdue',
+            taskId: task._id
+          });
+          if (!exists) {
+            const notif = new Notification({
+              userId: task.assignedTo,
+              type: 'task_overdue',
+              title: 'Task Overdue ⚠️',
+              content: `Alert: Your assigned task "${task.title}" is overdue.`,
+              taskId: task._id
+            });
+            await notif.save();
+
+            const socketId = activeSockets.get(task.assignedTo.toString());
+            if (socketId) {
+              io.to(socketId).emit('taskReminder', { task, type: 'overdue', notification: notif });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error checking due/overdue tasks:', err.message);
+    }
+  }, 6 * 60 * 60 * 1000); // Check every 6 hours
+}
+
+let isConnecting = false;
+let retryTimeout = null;
+let hasConnected = false;
+
+const scheduleReconnect = (delayMs = 10000) => {
+  if (retryTimeout) return;
+  retryTimeout = setTimeout(() => {
+    retryTimeout = null;
+    connectMongoDB();
+  }, delayMs);
+};
+
+const connectMongoDB = async () => {
+  if (mongoose.connection.readyState === 1 || isConnecting) return;
+  isConnecting = true;
+  try {
+    console.log('Connecting to MongoDB...');
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+      maxPoolSize: 10
+    });
+    console.log('Successfully connected to MongoDB.');
+    hasConnected = true;
+    isConnecting = false;
+    if (retryTimeout) {
+      clearTimeout(retryTimeout);
+      retryTimeout = null;
+    }
+    await seedSupportAccount();
+    startTaskReminderChecker();
+  } catch (err) {
+    isConnecting = false;
     console.error('❌ MongoDB Connection Error:', err.message);
     if (err.name === 'MongooseServerSelectionError') {
-      console.error('\n💡 Troubleshooting Tips:');
-      console.error('1. Whitelist your current IP address in your MongoDB Atlas Dashboard (under "Network Access").');
-      console.error('   If you are testing locally, adding "0.0.0.0/0" will allow connections from any IP.');
-      console.error('2. Make sure you are connected to the internet.');
-      console.error('3. If you want to use a local database, change MONGODB_URI in server/.env to:\n   MONGODB_URI=mongodb://127.0.0.1:27017/aetherchat\n');
+      console.error('💡 Atlas Tip: Ensure 0.0.0.0/0 is whitelisted in MongoDB Atlas Network Access.');
+    } else if (err.message && err.message.includes('auth')) {
+      console.error('💡 Atlas Tip: Check your MongoDB username and password in MONGODB_URI.');
     }
-  });
+    console.log('🔄 Will retry MongoDB connection in 10 seconds...');
+    scheduleReconnect(10000);
+  }
+};
+
+mongoose.connection.on('disconnected', () => {
+  if (hasConnected) {
+    console.warn('⚠️ MongoDB connection lost. Scheduling reconnect...');
+    hasConnected = false;
+    scheduleReconnect(5000);
+  }
+});
+
+connectMongoDB();
+
 
 // JWT Verification Middleware
 const authenticateToken = (req, res, next) => {
@@ -1936,6 +1989,55 @@ app.post('/api/messages/:messageId/star', authenticateToken, async (req, res) =>
   }
 });
 
+// 10.9b. Pin / unpin a message within a conversation (persistent, shared)
+app.post('/api/chats/:chatId/pin-message', authenticateToken, async (req, res) => {
+  const { chatId } = req.params;
+  const { messageId } = req.body; // null / omitted => unpin
+  try {
+    const convo = await Conversation.findById(chatId);
+    if (!convo) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    // Only participants may pin messages in the conversation
+    const isParticipant = convo.participants.some(pId => pId.toString() === req.userId);
+    if (!isParticipant) {
+      return res.status(403).json({ error: 'Not a participant of this conversation' });
+    }
+
+    // If pinning, ensure the message belongs to this conversation
+    if (messageId) {
+      const message = await Message.findById(messageId);
+      if (!message || message.conversationId.toString() !== chatId) {
+        return res.status(404).json({ error: 'Message not found in this conversation' });
+      }
+    }
+
+    convo.pinnedMessageId = messageId || null;
+    await convo.save();
+
+    // Broadcast update via Socket (same dual-emit pattern as reactions)
+    convo.participants.forEach(pId => {
+      const targetSocket = activeSockets.get(pId.toString());
+      if (targetSocket) {
+        io.to(targetSocket).emit('message_pinned', {
+          chatId,
+          pinnedMessageId: convo.pinnedMessageId
+        });
+      }
+    });
+    io.to(chatId).emit('message_pinned', {
+      chatId,
+      pinnedMessageId: convo.pinnedMessageId
+    });
+
+    res.json({ success: true, pinnedMessageId: convo.pinnedMessageId });
+  } catch (error) {
+    console.error('Failed to pin message:', error);
+    res.status(500).json({ error: 'Failed to pin message' });
+  }
+});
+
 // 10.10. Vote on poll
 app.post('/api/messages/:messageId/vote', authenticateToken, async (req, res) => {
   const { messageId } = req.params;
@@ -2022,19 +2124,55 @@ app.get('/api/chats/:chatId/media', authenticateToken, async (req, res) => {
   }
 });
 
-// 10.12. Search messages across user's conversations
+// 10.12. Search messages across user's conversations (with optional type/starred/sender filters)
 app.get('/api/messages/search', authenticateToken, async (req, res) => {
-  const { q, chatId, limit: limitStr, before } = req.query;
-  if (!q || !q.trim()) return res.status(400).json({ error: 'Search query is required' });
+  const { q, chatId, limit: limitStr, before, type, starred, senderId } = req.query;
+  const hasFilter = type || starred === 'true' || senderId;
+  // Text query is optional as long as at least one filter narrows the result set
+  if ((!q || !q.trim()) && !hasFilter) {
+    return res.status(400).json({ error: 'Search query or a filter is required' });
+  }
 
   try {
-    const searchRegex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     const msgLimit = Math.min(parseInt(limitStr) || 50, 100);
 
     const baseQuery = {
-      text: searchRegex,
       deletedBy: { $ne: req.userId }
     };
+
+    if (q && q.trim()) {
+      baseQuery.text = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    }
+
+    // Type / category filter
+    if (type && type !== 'all') {
+      if (type === 'media') {
+        baseQuery.type = { $in: ['image', 'video', 'gif', 'sticker'] };
+      } else if (type === 'link') {
+        // Links are text messages containing a URL. Combine the URL requirement
+        // with the (optional) text query via $and so neither clobbers the other.
+        baseQuery.type = 'text';
+        const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/i;
+        if (baseQuery.text) {
+          baseQuery.$and = [{ text: baseQuery.text }, { text: urlRegex }];
+          delete baseQuery.text;
+        } else {
+          baseQuery.text = urlRegex;
+        }
+      } else {
+        baseQuery.type = type;
+      }
+    }
+
+    // Starred-by-me filter
+    if (starred === 'true') {
+      baseQuery.starredBy = req.userId;
+    }
+
+    // Sender filter
+    if (senderId) {
+      baseQuery.senderId = senderId;
+    }
 
     if (chatId) {
       baseQuery.conversationId = chatId;
@@ -3114,7 +3252,7 @@ async function seedDatabase() {
     userName: eve.name,
     userAvatar: eve.avatar,
     items: [
-      { type: 'text', content: 'Sipping coffee and review designs â˜•âœ¨', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', timestamp: '10:00 AM' }
+      { type: 'text', content: 'Sipping coffee and review designs ☕✨', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', timestamp: '10:00 AM' }
     ]
   });
   await status1.save();
@@ -3122,90 +3260,32 @@ async function seedDatabase() {
   console.log('Seeding successfully completed.');
 }
 
-// Overdue and Due Today Tasks Checker (runs every 6 hours)
-setInterval(async () => {
-  try {
-    const startOfToday = new Date();
-    startOfToday.setHours(0,0,0,0);
-    const endOfToday = new Date();
-    endOfToday.setHours(23,59,59,999);
+// Serve static client assets in production if built
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
 
-    // 1. Tasks Due Today
-    const dueTodayTasks = await Task.find({
-      dueDate: { $gte: startOfToday, $lte: endOfToday },
-      status: { $ne: 'Completed' }
-    });
-
-    for (const task of dueTodayTasks) {
-      if (task.assignedTo) {
-        const exists = await Notification.findOne({
-          userId: task.assignedTo,
-          type: 'task_due_today',
-          taskId: task._id,
-          createdAt: { $gte: startOfToday }
-        });
-        if (!exists) {
-          const notif = new Notification({
-            userId: task.assignedTo,
-            type: 'task_due_today',
-            title: 'Task Due Today',
-            content: `Reminder: Your assigned task "${task.title}" is due today.`,
-            taskId: task._id
-          });
-          await notif.save();
-          
-          const socketId = activeSockets.get(task.assignedTo.toString());
-          if (socketId) {
-            io.to(socketId).emit('taskReminder', { task, type: 'due_today', notification: notif });
-          }
-        }
-      }
-    }
-
-    // 2. Overdue Tasks
-    const overdueTasks = await Task.find({
-      dueDate: { $lt: startOfToday },
-      status: { $ne: 'Completed' }
-    });
-
-    for (const task of overdueTasks) {
-      if (task.assignedTo) {
-        const exists = await Notification.findOne({
-          userId: task.assignedTo,
-          type: 'task_overdue',
-          taskId: task._id
-        });
-        if (!exists) {
-          const notif = new Notification({
-            userId: task.assignedTo,
-            type: 'task_overdue',
-            title: 'Task Overdue âš ï¸',
-            content: `Alert: Your assigned task "${task.title}" is overdue.`,
-            taskId: task._id
-          });
-          await notif.save();
-
-          const socketId = activeSockets.get(task.assignedTo.toString());
-          if (socketId) {
-            io.to(socketId).emit('taskReminder', { task, type: 'overdue', notification: notif });
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Error checking due/overdue tasks:', err);
-  }
-}, 6 * 60 * 60 * 1000); // Check every 6 hours
-
-// Serve static client assets in production
-app.use(express.static(distPath));
-
-// Fallback to React app router
+// Fallback to React app router or informative API status
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'API endpoint not found' });
   }
-  res.sendFile(path.join(distPath, 'index.html'));
+  const indexPath = path.join(distPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  res.status(200).json({
+    service: 'Aether Chat API Server',
+    status: 'online',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    databaseState: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
+    message: 'Aether Chat backend is running successfully.',
+    endpoints: {
+      health: '/health',
+      apiHealth: '/api/health',
+      apiBase: '/api'
+    }
+  });
 });
 
 // Launch server listener
