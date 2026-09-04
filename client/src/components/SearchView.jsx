@@ -30,6 +30,35 @@ const SearchView = () => {
   // Voice search state
   const [listening, setListening] = useState(false);
   const [voiceError, setVoiceError] = useState('');
+  // Result category filter + recent searches
+  const [category, setCategory] = useState('all');
+  const [recentSearches, setRecentSearches] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('aether_recent_searches') || '[]'); }
+    catch { return []; }
+  });
+
+  // Persist a term into the recent-searches list (most-recent first, max 8).
+  const rememberSearch = (term) => {
+    const t = term.trim();
+    if (!t) return;
+    setRecentSearches((prev) => {
+      const next = [t, ...prev.filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(0, 8);
+      try { localStorage.setItem('aether_recent_searches', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const clearRecentSearches = () => {
+    setRecentSearches([]);
+    try { localStorage.removeItem('aether_recent_searches'); } catch {}
+  };
+
+  // Record a search once the debounced query settles with real results.
+  useEffect(() => {
+    if (!query.trim()) return;
+    const id = setTimeout(() => rememberSearch(query), 900);
+    return () => clearTimeout(id);
+  }, [query]);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -115,6 +144,18 @@ const SearchView = () => {
   }, [query]);
   const totalResults = results.chats.length + results.messages.length + results.channels.length + results.communities.length + businessResults.length + organizationResults.length;
 
+  // Result category tabs (with live counts).
+  const CATEGORY_TABS = [
+    { id: 'all', label: 'All', count: totalResults },
+    { id: 'chats', label: 'Contacts', count: results.chats.length },
+    { id: 'messages', label: 'Messages', count: results.messages.length },
+    { id: 'channels', label: 'Channels', count: results.channels.length },
+    { id: 'communities', label: 'Communities', count: results.communities.length },
+    { id: 'businesses', label: 'Businesses', count: businessResults.length },
+    { id: 'organizations', label: 'Orgs', count: organizationResults.length },
+  ];
+  const showCat = (id) => category === 'all' || category === id;
+
   return (
     <div className="flex-1 h-full bg-[#080c14] flex flex-col overflow-hidden relative">
       <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: "radial-gradient(rgba(255,255,255,0.01) 1.5px, transparent 1.5px)", backgroundSize: "24px 24px" }} />
@@ -137,6 +178,26 @@ const SearchView = () => {
             className="w-full pl-9 pr-4 py-2.5 bg-slate-900 border border-white/5 rounded-xl text-xs text-slate-200 focus:border-emerald-500/25 outline-none placeholder:text-slate-500 transition-colors"
           />
         </div>
+
+        {/* Category filter tabs */}
+        {query.trim() && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {CATEGORY_TABS.filter((t) => t.id === 'all' || t.count > 0).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setCategory(t.id)}
+                className={`px-2.5 py-1 rounded-full text-[10px] font-semibold cursor-pointer transition-colors flex items-center gap-1 ${
+                  category === t.id
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-white/5'
+                }`}
+              >
+                {t.label}
+                <span className="opacity-70">{t.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Search results viewport */}
@@ -153,7 +214,7 @@ const SearchView = () => {
               <h3 className="text-[10px] text-slate-500 font-bold uppercase tracking-wider select-none">{totalResults} matches indexed</h3>
 
               {/* Chat results */}
-              {results.chats.length > 0 && (
+              {showCat('chats') && results.chats.length > 0 && (
                 <div className="space-y-2">
                   <h4 className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest flex items-center gap-1 select-none">
                     <FiUser size={10} /> Contact Sessions ({results.chats.length})
@@ -193,7 +254,7 @@ const SearchView = () => {
               )}
 
               {/* Message results */}
-              {results.messages.length > 0 && (
+              {showCat('messages') && results.messages.length > 0 && (
                 <div className="space-y-2 border-t border-white/5 pt-4">
                   <h4 className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest flex items-center gap-1 select-none">
                     <FiMessageSquare size={10} /> Message History ({results.messages.length})
@@ -220,7 +281,7 @@ const SearchView = () => {
               )}
 
               {/* Channels results */}
-              {results.channels.length > 0 && (
+              {showCat('channels') && results.channels.length > 0 && (
                 <div className="space-y-2 border-t border-white/5 pt-4">
                   <h4 className="text-[9px] text-rose-400 font-bold uppercase tracking-widest flex items-center gap-1 select-none">
                     <FiTv size={10} /> Channels ({results.channels.length})
@@ -248,7 +309,7 @@ const SearchView = () => {
               )}
 
               {/* Business results */}
-              {businessResults.length > 0 && (
+              {showCat('businesses') && businessResults.length > 0 && (
                 <div className="space-y-2 border-t border-white/5 pt-4">
                   <h4 className="text-[9px] text-blue-400 font-bold uppercase tracking-widest flex items-center gap-1 select-none">
                     <FiBriefcase size={10} /> Businesses ({businessResults.length})
@@ -283,7 +344,7 @@ const SearchView = () => {
               )}
 
               {/* Organization results */}
-                {organizationResults.length > 0 && (
+                {showCat('organizations') && organizationResults.length > 0 && (
                   <div className="space-y-2 border-t border-white/5 pt-4">
                     <h4 className="text-[9px] text-purple-400 font-bold uppercase tracking-widest flex items-center gap-1 select-none">
                       <FiBriefcase size={10} /> Organizations ({organizationResults.length})
@@ -317,7 +378,7 @@ const SearchView = () => {
                   </div>
                 )}
                 {/* Communities results */}
-              {results.communities.length > 0 && (
+              {showCat('communities') && results.communities.length > 0 && (
                 <div className="space-y-2 border-t border-white/5 pt-4">
                   <h4 className="text-[9px] text-purple-400 font-bold uppercase tracking-widest flex items-center gap-1 select-none">
                     <FiLayers size={10} /> Communities ({results.communities.length})
@@ -357,20 +418,49 @@ const SearchView = () => {
             </div>
           )
         ) : (
-          <div className="h-64 flex flex-col items-center justify-center text-center p-6 select-none">
-            <div className="w-12 h-12 bg-slate-900 border border-white/5 rounded-xl flex items-center justify-center mb-4 text-slate-600">
-              <FiSearch size={20} />
+          <div className="flex flex-col items-center justify-center text-center p-6 select-none min-h-[16rem] gap-6">
+            <div className="flex flex-col items-center">
+              <div className="w-12 h-12 bg-slate-900 border border-white/5 rounded-xl flex items-center justify-center mb-4 text-slate-600">
+                <FiSearch size={20} />
+              </div>
+              <h4 className="text-sm font-semibold text-slate-400">Search Workspace</h4>
+              <p className="text-slate-600 text-xs mt-1 max-w-[200px] leading-relaxed">
+                Start typing above to search your entire messaging database index.
+              </p>
             </div>
-            <h4 className="text-sm font-semibold text-slate-400">Search Workspace</h4>
-            <p className="text-slate-600 text-xs mt-1 max-w-[200px] leading-relaxed">
-              Start typing above to search your entire messaging database index.
-            </p>
+
+            {recentSearches.length > 0 && (
+              <div className="w-full max-w-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <h5 className="text-[9px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-1">
+                    <FiClock size={10} /> Recent Searches
+                  </h5>
+                  <button
+                    onClick={clearRecentSearches}
+                    className="text-[9px] text-slate-500 hover:text-rose-400 uppercase tracking-wider cursor-pointer transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {recentSearches.map((term) => (
+                    <button
+                      key={term}
+                      onClick={() => setQuery(term)}
+                      className="px-3 py-1.5 bg-slate-900 border border-white/5 rounded-full text-[11px] text-slate-300 hover:text-white hover:border-emerald-500/25 cursor-pointer transition-colors flex items-center gap-1.5"
+                    >
+                      <FiTrendingUp size={10} className="text-emerald-400" /> {term}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <div className="p-4 border-t border-white/5 bg-slate-950/80 text-center select-none text-[9px] text-slate-600">
-        Search query vectors are evaluated entirely locally within this sandbox.
+        Searches contacts, messages, channels, communities, businesses & organizations — matches update as you type.
       </div>
     </div>
   );

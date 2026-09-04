@@ -354,9 +354,11 @@ const Sidebar = ({ onSelectStatus: onSelectStatusProp, onSelectChat: onSelectCha
   // Filtered & sorted chat list
   const filteredChats = useMemo(() => chats.filter((c) => {
     const entity = c.type === 'group' ? c.group : c.user;
-    const nameMatch = entity?.name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const usernameMatch = entity?.username?.toLowerCase().includes(searchQuery.toLowerCase());
-    if (searchQuery && !nameMatch && !usernameMatch) return false;
+    const q = searchQuery.toLowerCase();
+    const nameMatch = entity?.name?.toLowerCase().includes(q);
+    const usernameMatch = entity?.username?.toLowerCase().includes(q);
+    const msgMatch = !!q && (c.messages || []).some((m) => m.text && m.text.toLowerCase().includes(q));
+    if (searchQuery && !nameMatch && !usernameMatch && !msgMatch) return false;
     if (chatFilter === 'pinned') return c.pinned;
     if (chatFilter === 'favorites') return c.favorite;
     if (chatFilter === 'archived') return c.archived;
@@ -644,6 +646,16 @@ const Sidebar = ({ onSelectStatus: onSelectStatusProp, onSelectChat: onSelectCha
                 preview = <span className="text-emerald-400 font-semibold">Draft: {chat.draft}</span>;
               } else {
                 preview = 'No messages yet';
+              }
+
+              // When a search matched message content (not the name), surface it.
+              const q = searchQuery.trim().toLowerCase();
+              const nameHit = q && (entity?.name?.toLowerCase().includes(q) || entity?.username?.toLowerCase().includes(q));
+              const contentHit = q && !nameHit
+                ? (chat.messages || []).find((m) => m.text && m.text.toLowerCase().includes(q))
+                : null;
+              if (contentHit) {
+                preview = <span><span className="text-blue-500 dark:text-blue-400 font-semibold">↳ </span>{contentHit.text}</span>;
               }
 
               return (

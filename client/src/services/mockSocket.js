@@ -379,10 +379,12 @@ class SocketService {
         responseText = "📝 **Session Summary Report (Aether AI):**\n\n1. **Figma Mockups**: Evelyn requested feedback on dark mode layouts.\n2. **Theme Blur**: Recommended increase to 16px blur on glassmorphic cards (updated successfully).\n3. **Typography Poll**: The team is voting on display font. *Outfit* is currently leading over *Inter*.\n4. **System Security**: Daniel confirmed iOS scroll optimizations are active on the dev sandbox.\n\n*Note: Real LLM summarization requires a Grok API Key.*";
       } else if (lower.includes('rewrite') || lower.includes('improve')) {
         responseText = "✍️ **Refined Draft Options:**\n\n*Option 1 (Professional):*\n\"Hello everyone, I've finalized the visual audits and updated the glassmorphism blur parameters to 16px. The elements now resolve with significantly better readability. Please let me know your thoughts on the PDF document.\"\n\n*Option 2 (Casual/Sleek):*\n\"Hey team! Adjusted the card blur to 16px. It looks clean and premium. Let me know what you think of the new guidelines PDF! 🚀\"";
-      } else if (lower.includes('help') || lower.includes('commands') || lower.includes('setup') || lower.includes('hello') || lower.includes('hi')) {
-        responseText = "🤖 **Aether AI Configuration Guide:**\n\nTo make me **so intelligent** (powered by real-time xAI Grok models):\n1. Go to **Settings** (bottom left gear icon ⚙️).\n2. Scroll to the **Aether AI** section.\n3. Paste your **Grok API Key** (obtained from the xAI console).\n4. Or, start your Node backend and add `GROK_API_KEY=...` to [server/.env](file:///C:/Users/USER/Desktop/bashab/server/.env).\n\n**Simulated Commands (offline mode):**\n- `summarize` - Summarize the active design discussions.\n- `translate <text>` - Simulate translation.\n- `rewrite <text>` - Format and polish drafting templates.\n- `draw <subject>` - Generate a high-fidelity image dynamically!\n- Ask me anything else to test the interactive messaging UI!";
+      } else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+        responseText = "🤖 **Aether AI:** Hello! I am Aether AI, your workspace co-pilot. How can I help you today? 😊";
+      } else if (lower.includes('help') || lower.includes('commands') || lower.includes('setup')) {
+        responseText = "🤖 **Aether AI Assistance:**\n\nHere are some commands you can run:\n- `summarize` - Summarize active design discussions.\n- `translate <text>` - Translate a message.\n- `rewrite <text>` - Polish/improve a draft.\n- `draw <subject>` - Generate an image dynamically!";
       } else {
-        responseText = `🤖 **Aether Companion (Simulation Mode)**\n\nI analyzed your query: *"type: ${userPrompt}"*\n\nTo unlock real intelligence, please paste your **Grok API Key** in **Settings ⚙️**! I will then dynamically answer all questions, write code, explain designs, and chat with you just like a live developer companion! 🚀`;
+        responseText = `🤖 **Aether AI:** I received your message: "${userPrompt}". I'm running in companion mode right now. Let me know if there's anything else I can help you with!`;
       }
     }
 

@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useChat } from '../contexts/ChatContext';
+import { messageCategory } from '../utils/messageSearch';
 import { 
   FiUser, FiCamera, FiEdit3, FiPhone, FiInfo, FiMail, 
   FiFolder, FiImage, FiFileText, FiLink, FiCheck, FiHeart 
@@ -49,10 +50,20 @@ const ProfileView = () => {
     setIsEditing(false);
   };
 
-  // Calculate media count from mock database
-  const mediaCount = 5;
-  const docsCount = 3;
-  const linksCount = 2;
+  // Real shared-media metrics across all conversations.
+  const { mediaCount, docsCount, linksCount } = useMemo(() => {
+    let media = 0, docs = 0, links = 0;
+    (chats || []).forEach((c) => {
+      (c.messages || []).forEach((m) => {
+        if (m.isDateDivider) return;
+        const cat = messageCategory(m);
+        if (cat === 'media') media++;
+        else if (cat === 'doc') docs++;
+        else if (cat === 'link') links++;
+      });
+    });
+    return { mediaCount: media, docsCount: docs, linksCount: links };
+  }, [chats]);
 
   return (
     <div className="flex-1 h-full bg-[#080c14] flex flex-col overflow-hidden relative">

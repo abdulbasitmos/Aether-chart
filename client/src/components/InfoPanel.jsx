@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { useChat } from '../contexts/ChatContext';
+import { useChat, resolveMediaUrl } from '../contexts/ChatContext';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  FiX, FiInfo, FiLayers, FiSearch, FiSliders, FiTrash2, 
+import {
+  FiX, FiInfo, FiLayers, FiSearch, FiSliders, FiTrash2,
   FiFileText, FiLink, FiImage, FiCompass, FiShield, FiAlertTriangle,
-  FiGlobe, FiCheck, FiHeart, FiCpu, FiStar, FiEdit, FiUserPlus, 
-  FiUserMinus, FiLogOut, FiBriefcase, FiCalendar, FiShoppingBag
+  FiGlobe, FiCheck, FiHeart, FiCpu, FiStar, FiEdit, FiUserPlus,
+  FiUserMinus, FiLogOut, FiBriefcase, FiCalendar, FiShoppingBag, FiVideo
 } from 'react-icons/fi';
 import { getAvatarSvg } from '../data/mockData';
+import { filterMessages, hasLink, SEARCH_CATEGORIES, senderIdOf } from '../utils/messageSearch';
 import toast from 'react-hot-toast';
 
 const InfoPanel = () => {
@@ -35,6 +36,13 @@ const InfoPanel = () => {
   const [aiOutput, setAiOutput] = useState('');
   const [aiThinking, setAiThinking] = useState(false);
   const [localSearch, setLocalSearch] = useState('');
+  // Advanced search-tab filters
+  const [searchCategory, setSearchCategory] = useState('all');
+  const [searchStarred, setSearchStarred] = useState(false);
+  const [searchSender, setSearchSender] = useState('all');
+  // Media-tab sub-filter + search
+  const [mediaFilter, setMediaFilter] = useState('photos');
+  const [mediaSearch, setMediaSearch] = useState('');
 
   // Group settings & management states
   const [isEditingName, setIsEditingName] = useState(false);
@@ -182,9 +190,58 @@ const InfoPanel = () => {
   const currentMembersIds = targetGroup ? targetGroup.members?.map(m => m.id || m._id) || [] : [];
   const addableContacts = contactsList.filter(c => !currentMembersIds.includes(c._id) && !currentMembersIds.includes(c.id));
 
-  const filteredMessages = selectedChat.messages.filter(m => 
-    m.text && m.text.toLowerCase().includes(localSearch.toLowerCase())
+  // Advanced in-chat search: query + category chips + starred + sender.
+  const searchResults = useMemo(() => filterMessages(selectedChat.messages || [], {
+    query: localSearch.trim(),
+    category: searchCategory,
+    starred: searchStarred,
+    senderId: searchSender !== 'all' ? searchSender : null,
+  }), [selectedChat.messages, localSearch, searchCategory, searchStarred, searchSender]);
+
+  // Distinct senders present in this chat (for the group sender dropdown).
+  const chatSenders = useMemo(() => {
+    if (selectedChat.type !== 'group') return [];
+    const seen = new Map();
+    (targetGroup?.members || []).forEach((m) => {
+      const id = m.id || m._id;
+      if (id) seen.set(id.toString(), m.name || 'Member');
+    });
+    return Array.from(seen, ([id, name]) => ({ id, name }));
+  }, [selectedChat.type, targetGroup]);
+
+  // Real shared media derived from the loaded messages (replaces mock data).
+  const mediaBuckets = useMemo(() => {
+    const msgs = (selectedChat.messages || []).filter((m) => !m.isDateDivider);
+    return {
+      photos: msgs.filter((m) => ['image', 'gif', 'sticker'].includes(m.type)),
+      videos: msgs.filter((m) => m.type === 'video'),
+      docs: msgs.filter((m) => m.type === 'document'),
+      links: msgs.filter((m) => m.type === 'text' && hasLink(m.text)),
+    };
+  }, [selectedChat.messages]);
+
+  const mediaQ = mediaSearch.trim().toLowerCase();
+  const currentMedia = (mediaBuckets[mediaFilter] || []).filter((m) =>
+    !mediaQ ||
+    (m.fileName && m.fileName.toLowerCase().includes(mediaQ)) ||
+    (m.caption && m.caption.toLowerCase().includes(mediaQ)) ||
+    (m.text && m.text.toLowerCase().includes(mediaQ))
   );
+
+  // Scroll to + flash a message in the main chat window by id.
+  const scrollToMessage = (msg) => {
+    const msgId = msg.id || msg._id;
+    const el = document.getElementById(msgId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('bg-emerald-500/20', 'border-emerald-500/40', 'shadow-[0_0_15px_rgba(16,185,129,0.2)]');
+      setTimeout(() => {
+        el.classList.remove('bg-emerald-500/20', 'border-emerald-500/40', 'shadow-[0_0_15px_rgba(16,185,129,0.2)]');
+      }, 3000);
+    } else {
+      toast.error('Message not loaded in active viewport scroll limit');
+    }
+  };
 
   return (
     <div className="w-full md:w-80 h-full border-l border-white/5 bg-slate-950 flex flex-col justify-between overflow-hidden">
@@ -754,82 +811,115 @@ const InfoPanel = () => {
 
         {/* TABS 3: MEDIA VIEW */}
         {rightPanelTab === 'media' && (
-          <div className="p-6 space-y-6">
-            {/* Grid of Shared Media Photos */}
-            <div>
-              <h5 className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mb-3">Photos & Graphics</h5>
+          <div className="p-6 space-y-5">
+            {/* Sub-filter tabs */}
+            <div className="flex gap-1.5">
+              {[
+                { id: 'photos', label: 'Photos', icon: <FiImage size={12} /> },
+                { id: 'videos', label: 'Videos', icon: <FiVideo size={12} /> },
+                { id: 'docs', label: 'Docs', icon: <FiFileText size={12} /> },
+                { id: 'links', label: 'Links', icon: <FiLink size={12} /> },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setMediaFilter(f.id)}
+                  className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer transition-colors ${
+                    mediaFilter === f.id
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {f.icon} {f.label}
+                  <span className="opacity-70">{mediaBuckets[f.id]?.length || 0}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Search over media */}
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500"><FiSearch size={13} /></span>
+              <input
+                type="text"
+                value={mediaSearch}
+                onChange={(e) => setMediaSearch(e.target.value)}
+                placeholder="Search media..."
+                className="w-full pl-9 pr-4 py-2 bg-slate-900 border border-white/5 rounded-xl text-xs text-slate-200 focus:border-emerald-500/20 outline-none"
+              />
+            </div>
+
+            {currentMedia.length === 0 ? (
+              <div className="h-40 flex flex-col justify-center items-center text-center text-slate-500">
+                <FiLayers size={22} className="mb-2 opacity-50" />
+                <p className="text-xs">No {mediaFilter} in this conversation yet</p>
+              </div>
+            ) : (mediaFilter === 'photos' || mediaFilter === 'videos') ? (
               <div className="grid grid-cols-3 gap-2">
-                {[
-                  'linear-gradient(to right, #111827, #1E3A8A)',
-                  'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)',
-                  'linear-gradient(to bottom, #2563EB, #3B82F6)',
-                  'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)',
-                  'linear-gradient(to right, #243b55, #141e30)'
-                ].map((bg, idx) => (
-                  <div 
-                    key={idx} 
-                    onClick={() => toast.success('Fullscreen image opened!')}
-                    className="aspect-square rounded-xl border border-white/5 cursor-pointer hover:opacity-80 active:scale-95 transition-all overflow-hidden flex items-center justify-center"
-                    style={{ background: bg }}
+                {currentMedia.map((m) => (
+                  <div
+                    key={m.id || m._id}
+                    onClick={() => scrollToMessage(m)}
+                    className="aspect-square rounded-xl border border-white/5 cursor-pointer hover:opacity-80 active:scale-95 transition-all overflow-hidden flex items-center justify-center bg-slate-900 relative"
                   >
-                    <FiImage className="text-white/20" size={14} />
+                    {m.mediaUrl ? (
+                      mediaFilter === 'videos' ? (
+                        <>
+                          <video src={resolveMediaUrl(m.mediaUrl)} className="w-full h-full object-cover" />
+                          <span className="absolute inset-0 flex items-center justify-center bg-black/30"><FiVideo className="text-white" size={16} /></span>
+                        </>
+                      ) : (
+                        <img src={resolveMediaUrl(m.mediaUrl)} alt={m.caption || 'Shared media'} className="w-full h-full object-cover" />
+                      )
+                    ) : (
+                      <FiImage className="text-white/20" size={14} />
+                    )}
                   </div>
                 ))}
               </div>
-            </div>
-
-            {/* Document Files List */}
-            <div className="space-y-3">
-              <h5 className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Shared Documents</h5>
+            ) : mediaFilter === 'docs' ? (
               <div className="space-y-2">
-                {[
-                  { name: 'Aether_Design_System_v2.pdf', size: '4.2 MB' },
-                  { name: 'Client_Requirements_Draft.docx', size: '840 KB' },
-                  { name: 'App_Architecture.zip', size: '15.4 MB' }
-                ].map((doc, idx) => (
-                  <div 
-                    key={idx} 
-                    onClick={() => toast.success(`Downloading ${doc.name}...`)}
+                {currentMedia.map((m) => (
+                  <div
+                    key={m.id || m._id}
+                    onClick={() => scrollToMessage(m)}
                     className="p-3 bg-slate-900 border border-white/5 rounded-xl flex items-center gap-3 cursor-pointer hover:bg-slate-800 transition-colors group"
                   >
                     <div className="p-2 bg-slate-950 rounded-lg text-emerald-400 border border-white/5"><FiFileText size={14} /></div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-slate-200 truncate group-hover:text-emerald-400 transition-colors">{doc.name}</p>
-                      <p className="text-[9px] text-slate-500">{doc.size}</p>
+                      <p className="text-xs font-semibold text-slate-200 truncate group-hover:text-emerald-400 transition-colors">{m.fileName || 'Document'}</p>
+                      <p className="text-[9px] text-slate-500">{m.fileSize || ''}</p>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-
-            {/* Link Shared List */}
-            <div className="space-y-3">
-              <h5 className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Shared Links</h5>
+            ) : (
               <div className="space-y-2">
-                {[
-                  { title: 'Tailwind CSS v4.0 Release Notes', url: 'https://tailwindcss.com/blog/v4' },
-                  { title: 'Figma Design Mockups Workspace', url: 'https://figma.com/file/aether' }
-                ].map((link, idx) => (
-                  <div 
-                    key={idx} 
-                    onClick={() => toast.success(`Redirecting to ${link.url}`)}
-                    className="p-3 bg-slate-900 border border-white/5 rounded-xl flex items-center gap-3 cursor-pointer hover:bg-slate-800 transition-colors group"
-                  >
-                    <div className="p-2 bg-slate-950 rounded-lg text-emerald-400 border border-white/5"><FiLink size={14} /></div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-slate-200 truncate group-hover:text-emerald-400 transition-colors">{link.title}</p>
-                      <p className="text-[9px] text-slate-500 truncate">{link.url}</p>
-                    </div>
-                  </div>
-                ))}
+                {currentMedia.map((m) => {
+                  const url = (m.text.match(/(https?:\/\/[^\s]+)|(www\.[^\s]+)/i) || [])[0] || m.text;
+                  const href = url.startsWith('http') ? url : `https://${url}`;
+                  return (
+                    <a
+                      key={m.id || m._id}
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-3 bg-slate-900 border border-white/5 rounded-xl flex items-center gap-3 cursor-pointer hover:bg-slate-800 transition-colors group"
+                    >
+                      <div className="p-2 bg-slate-950 rounded-lg text-emerald-400 border border-white/5"><FiLink size={14} /></div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-slate-200 truncate group-hover:text-emerald-400 transition-colors">{m.text}</p>
+                        <p className="text-[9px] text-slate-500 truncate">{url}</p>
+                      </div>
+                    </a>
+                  );
+                })}
               </div>
-            </div>
+            )}
           </div>
         )}
 
         {/* TABS 4: SEARCH INSIDE CHAT */}
         {rightPanelTab === 'search' && (
-          <div className="p-6 space-y-5">
+          <div className="p-6 space-y-4">
             <div className="relative">
               <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500"><FiSearch size={14} /></span>
               <input
@@ -841,47 +931,76 @@ const InfoPanel = () => {
               />
             </div>
 
-            {localSearch ? (
+            {/* Category filter chips + starred toggle */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {SEARCH_CATEGORIES.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setSearchCategory(cat.id)}
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-semibold cursor-pointer transition-colors ${
+                    searchCategory === cat.id
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setSearchStarred((v) => !v)}
+                className={`px-2.5 py-1 rounded-full text-[10px] font-semibold cursor-pointer transition-colors flex items-center gap-1 ${
+                  searchStarred ? 'bg-amber-500 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <FiStar size={10} className={searchStarred ? 'fill-current' : ''} /> Starred
+              </button>
+            </div>
+
+            {/* Sender dropdown (group chats only) */}
+            {selectedChat.type === 'group' && chatSenders.length > 0 && (
+              <select
+                value={searchSender}
+                onChange={(e) => setSearchSender(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-white/5 rounded-xl text-xs text-slate-200 focus:border-emerald-500/20 outline-none cursor-pointer"
+              >
+                <option value="all">All senders</option>
+                {chatSenders.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            )}
+
+            {(localSearch.trim() || searchCategory !== 'all' || searchStarred || searchSender !== 'all') ? (
               <div className="space-y-3">
-                <p className="text-[10px] text-slate-500 font-semibold uppercase">{filteredMessages.length} Matches Found</p>
-                <div className="space-y-2.5 max-h-[50vh] overflow-y-auto no-scrollbar">
-                  {filteredMessages.map((msg) => (
-                    <div 
+                <p className="text-[10px] text-slate-500 font-semibold uppercase">{searchResults.length} Matches Found</p>
+                <div className="space-y-2.5 max-h-[46vh] overflow-y-auto no-scrollbar">
+                  {searchResults.map((msg) => {
+                    const isMine = senderIdOf(msg) === (me?._id || me?.id) || msg.senderId === 'user_me';
+                    return (
+                    <div
                       key={msg.id || msg._id}
-                      onClick={() => {
-                        const msgId = msg.id || msg._id;
-                        const el = document.getElementById(msgId);
-                        if (el) {
-                          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          el.classList.add('bg-emerald-500/20');
-                          el.classList.add('border-emerald-500/40');
-                          el.classList.add('shadow-[0_0_15px_rgba(16,185,129,0.2)]');
-                          setTimeout(() => {
-                            el.classList.remove('bg-emerald-500/20');
-                            el.classList.remove('border-emerald-500/40');
-                            el.classList.remove('shadow-[0_0_15px_rgba(16,185,129,0.2)]');
-                          }, 3000);
-                        } else {
-                          toast.error('Message not loaded in active viewport scroll limit');
-                        }
-                      }}
-                      className="p-3 bg-slate-900/60 border border-white/5 hover:border-white/10 rounded-xl space-y-1 cursor-pointer hover:bg-slate-900 transition-all active:scale-[0.99] border-transparent"
+                      onClick={() => scrollToMessage(msg)}
+                      className="p-3 bg-slate-900/60 border border-white/5 hover:border-white/10 rounded-xl space-y-1 cursor-pointer hover:bg-slate-900 transition-all active:scale-[0.99]"
                     >
                       <div className="flex justify-between items-center text-[9px] text-slate-500 font-medium select-none">
-                        <span>{msg.senderId === 'user_me' ? 'You' : displayName}</span>
+                        <span>{isMine ? 'You' : (msg.senderName || displayName)}</span>
                         <span>{msg.timestamp}</span>
                       </div>
-                      <p className="text-xs text-slate-300 font-sans leading-relaxed">
-                        {msg.text}
+                      <p className="text-xs text-slate-300 font-sans leading-relaxed truncate">
+                        {msg.text || (msg.fileName ? `📎 ${msg.fileName}` : msg.caption || `[${msg.type || 'message'}]`)}
                       </p>
                     </div>
-                  ))}
+                    );
+                  })}
+                  {searchResults.length === 0 && (
+                    <p className="text-xs text-slate-500 text-center py-6">No messages match these filters</p>
+                  )}
                 </div>
               </div>
             ) : (
               <div className="h-44 flex flex-col justify-center items-center text-center text-slate-500">
                 <FiSearch size={22} className="mb-2 opacity-50" />
-                <p className="text-xs">Type search query to inspect this chat session</p>
+                <p className="text-xs">Type a query or pick a filter to inspect this chat</p>
               </div>
             )}
           </div>

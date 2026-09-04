@@ -6,7 +6,7 @@ import {
   FiSettings, FiLock, FiBell, FiMessageSquare, FiSliders, 
   FiGlobe, FiHelpCircle, FiInfo, FiCheck, FiShield, FiMoon,
   FiTrash2, FiSmartphone, FiLink, FiFolder, FiCpu,
-  FiDatabase, FiDownload, FiTerminal, FiAlertTriangle, FiUser, FiActivity, FiX
+  FiDatabase, FiDownload, FiTerminal, FiAlertTriangle, FiUser, FiActivity, FiX, FiSearch
 } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -25,6 +25,7 @@ const SettingsView = () => {
   const userA11yPrefs = user?.accessibilityPrefs || {};
 
   const [activeSubTab, setActiveSubTab] = useState('profile'); // tab list id
+  const [settingsQuery, setSettingsQuery] = useState('');
 
   // Layout Spacing state
   const [layoutSpacing, setLayoutSpacing] = useState(() => {
@@ -264,6 +265,35 @@ const SettingsView = () => {
     { id: 'danger', icon: <FiAlertTriangle size={18} />, label: 'Danger Zone' }
   ];
 
+  // Extra keywords per tab so a search for "password", "dark mode", "wallpaper",
+  // etc. jumps to the right section even when the label doesn't contain the word.
+  const settingsKeywords = {
+    profile: ['name', 'username', 'bio', 'avatar', 'status', 'photo'],
+    appearance: ['theme', 'dark mode', 'light', 'wallpaper', 'font', 'color', 'bubble', 'chat background'],
+    chats: ['backup', 'export', 'clear history', 'media', 'enter to send', 'archive'],
+    notifications: ['sound', 'mute', 'alerts', 'push', 'vibrate', 'preview', 'badge'],
+    privacy: ['blocked', 'last seen', 'read receipts', 'online', 'password', 'encryption'],
+    account: ['2fa', 'two factor', 'pin', 'lock', 'authentication', 'security code'],
+    upgrade: ['premium', 'business', 'plan', 'subscription', 'verified'],
+    devices: ['sessions', 'log out', 'linked devices', 'active'],
+    accounts: ['google', 'linked', 'oauth', 'connected', 'integrations'],
+    storage: ['cache', 'space', 'usage', 'clear data', 'downloads'],
+    ai: ['assistant', 'gemini', 'model', 'suggestions', 'smart replies'],
+    accessibility: ['contrast', 'text size', 'motion', 'screen reader', 'zoom'],
+    language: ['region', 'translate', 'locale', 'timezone'],
+    developer: ['logs', 'diagnostics', 'api', 'console', 'debug'],
+    help: ['support', 'faq', 'contact', 'report'],
+    about: ['version', 'legal', 'terms', 'license'],
+    danger: ['delete account', 'deactivate', 'reset', 'erase'],
+  };
+
+  const settingsQ = settingsQuery.trim().toLowerCase();
+  const filteredTabs = settingsQ
+    ? settingsTabs.filter((t) =>
+        t.label.toLowerCase().includes(settingsQ) ||
+        (settingsKeywords[t.id] || []).some((k) => k.includes(settingsQ) || settingsQ.includes(k)))
+    : settingsTabs;
+
   return (
     <div className="flex-1 h-full bg-[#080c14] flex flex-col overflow-hidden relative">
       <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: `radial-gradient(${userTheme.mode === 'light' ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.01)'} 1.5px, transparent 1.5px)`, backgroundSize: "24px 24px" }} />
@@ -281,14 +311,36 @@ const SettingsView = () => {
         
         {/* Left Sub-navigation */}
         <div className="w-1/3 border-r border-white/5 overflow-y-auto no-scrollbar p-4 space-y-1.5 shrink-0 select-none bg-slate-950/20">
-          <h3 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider px-1 mb-2 select-none">System categories</h3>
-          {settingsTabs.map((tab) => (
+          <div className="relative mb-3">
+            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500"><FiSearch size={13} /></span>
+            <input
+              type="text"
+              value={settingsQuery}
+              onChange={(e) => setSettingsQuery(e.target.value)}
+              placeholder="Search settings..."
+              className="w-full pl-8 pr-8 py-2 bg-slate-900 border border-white/5 rounded-lg text-[11px] text-slate-200 focus:border-emerald-500/25 outline-none"
+            />
+            {settingsQuery && (
+              <button
+                onClick={() => setSettingsQuery('')}
+                className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-slate-200 cursor-pointer"
+              >
+                <FiX size={13} />
+              </button>
+            )}
+          </div>
+          <h3 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider px-1 mb-2 select-none">
+            {settingsQ ? `${filteredTabs.length} result${filteredTabs.length === 1 ? '' : 's'}` : 'System categories'}
+          </h3>
+          {filteredTabs.length === 0 ? (
+            <p className="text-[11px] text-slate-500 px-1 py-4 text-center">No settings match "{settingsQuery}"</p>
+          ) : filteredTabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveSubTab(tab.id)}
+              onClick={() => { setActiveSubTab(tab.id); setSettingsQuery(''); }}
               className={`w-full p-2.5 rounded-xl flex items-center gap-2.5 cursor-pointer border transition-all text-xs font-semibold ${
-                activeSubTab === tab.id 
-                  ? 'bg-slate-900 border-white/5 text-emerald-400 shadow-md font-bold' 
+                activeSubTab === tab.id
+                  ? 'bg-slate-900 border-white/5 text-emerald-400 shadow-md font-bold'
                   : 'bg-transparent border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >

@@ -11,8 +11,10 @@ import {
   FiDownload, FiShare2, FiPlay, FiPause, FiHelpCircle, FiMessageSquare,
   FiVolumeX, FiVolume2, FiLock, FiGlobe, FiCopy, FiShield, FiArrowUp, 
   FiCheckCircle, FiUploadCloud, FiLayers, FiClock, FiEye, FiEyeOff,
-  FiCpu, FiBriefcase, FiRefreshCw, FiZap, FiCode, FiSlash
+  FiCpu, FiBriefcase, FiRefreshCw, FiZap, FiCode, FiSlash,
+  FiChevronUp, FiChevronDown
 } from 'react-icons/fi';
+import { filterMessages, SEARCH_CATEGORIES } from '../utils/messageSearch';
 import EmojiPicker from 'emoji-picker-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -230,6 +232,7 @@ const ChatWindow = () => {
     addReaction,
     votePoll,
     toggleStarMessage,
+    pinMessage,
     clearChatHistory,
     setChatDisappearing,
     setRightPanelTab,
@@ -268,13 +271,20 @@ const ChatWindow = () => {
   const [editingMsg, setEditingMsg] = useState(null);
 
   const [showReactionsMsgId, setShowReactionsMsgId] = useState(null);
-  const [pinnedMessageState, setPinnedMessageState] = useState({}); // { chatId: msg }
   const [isSending, setIsSending] = useState(false);
   const [deleteTargetMsg, setDeleteTargetMsg] = useState(null); // message pending delete confirmation
   const [forwardMsg, setForwardMsg] = useState(null); // message to forward
   const [fwdSearchQuery, setFwdSearchQuery] = useState('');
   const [fwdSearchResults, setFwdSearchResults] = useState([]);
   const [fwdLoading, setFwdLoading] = useState(false);
+
+  // Inline in-chat search bar (Ctrl+F / header search icon)
+  const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const [inlineSearchQuery, setInlineSearchQuery] = useState('');
+  const [inlineSearchCategory, setInlineSearchCategory] = useState('all');
+  const [inlineSearchStarred, setInlineSearchStarred] = useState(false);
+  const [inlineMatchIndex, setInlineMatchIndex] = useState(0);
+  const inlineSearchInputRef = useRef(null);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -344,6 +354,45 @@ const ChatWindow = () => {
       }
     }, 300);
   }, []);
+
+  // Inline search: list of matching message ids (in chat order) over the
+  // currently-loaded messages, using the shared filter helper.
+  const inlineSearchMatches = useMemo(() => {
+    const q = inlineSearchQuery.trim();
+    if (!inlineSearchOpen) return [];
+    if (!q && inlineSearchCategory === 'all' && !inlineSearchStarred) return [];
+    return filterMessages(selectedChat?.messages || [], {
+      query: q,
+      category: inlineSearchCategory,
+      starred: inlineSearchStarred,
+    }).map((m) => m.id || m._id);
+  }, [inlineSearchOpen, inlineSearchQuery, inlineSearchCategory, inlineSearchStarred, selectedChat?.messages]);
+
+  // Jump to a match by index (wraps around) and flash it.
+  const goToInlineMatch = useCallback((index) => {
+    const list = inlineSearchMatches;
+    if (!list.length) return;
+    const clamped = ((index % list.length) + list.length) % list.length;
+    setInlineMatchIndex(clamped);
+    highlightMessage(list[clamped]);
+  }, [inlineSearchMatches, highlightMessage]);
+
+  // When the match set changes (new query/filter), jump to the first hit.
+  useEffect(() => {
+    if (inlineSearchMatches.length) {
+      setInlineMatchIndex(0);
+      highlightMessage(inlineSearchMatches[0]);
+    } else {
+      setInlineMatchIndex(0);
+    }
+  }, [inlineSearchMatches, highlightMessage]);
+
+  // Focus the input whenever the inline bar opens.
+  useEffect(() => {
+    if (inlineSearchOpen) {
+      setTimeout(() => inlineSearchInputRef.current?.focus(), 50);
+    }
+  }, [inlineSearchOpen]);
 
   // Listen for router state to highlight search results
   useEffect(() => {
@@ -731,11 +780,10 @@ const ChatWindow = () => {
         setActiveSubMenu(null);
       }
       
-      // 2. Ctrl + F: Search inside chat
+      // 2. Ctrl + F: Search inside chat (inline bar)
       if (e.ctrlKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
-        setIsRightPanelOpen(true);
-        setRightPanelTab('search');
+        setInlineSearchOpen(true);
       }
 
       // 3. Home: scroll to first message
@@ -1440,12 +1488,13 @@ const isTyping = selectedChat && typingStatus?.[selectedChat.id] && Object.value
             </>
           )}
 
-          <button 
-            onClick={() => {
-              setIsRightPanelOpen(true);
-              setRightPanelTab('search');
-            }}
-            className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-[#2A3942] text-[#8696A0] hover:text-[#E9EDEF] cursor-pointer active:scale-95 transition-all duration-300"
+          <button
+            onClick={() => setInlineSearchOpen((v) => !v)}
+            className={`w-10 h-10 rounded-full flex items-center justify-center cursor-pointer active:scale-95 transition-all duration-300 ${
+              inlineSearchOpen
+                ? 'bg-[#2563EB]/20 text-[#2563EB]'
+                : 'hover:bg-[#2A3942] text-[#8696A0] hover:text-[#E9EDEF]'
+            }`}
             title="Search in Chat"
           >
             <FiSearch size={20} />
@@ -1631,23 +1680,120 @@ const isTyping = selectedChat && typingStatus?.[selectedChat.id] && Object.value
 
       {activeSubTab === 'chat' && (
         <>
+          {/* Inline in-chat search bar (Ctrl+F / header search icon) */}
+          {inlineSearchOpen && (
+            <div className="bg-[#202C33] border-b border-white/5 px-4 py-2.5 z-20 flex flex-col gap-2 select-none animate-fade-in">
+              <div className="flex items-center gap-2">
+                <FiSearch size={16} className="text-[#8696A0] shrink-0" />
+                <input
+                  ref={inlineSearchInputRef}
+                  value={inlineSearchQuery}
+                  onChange={(e) => setInlineSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      goToInlineMatch(inlineMatchIndex + (e.shiftKey ? -1 : 1));
+                    } else if (e.key === 'Escape') {
+                      setInlineSearchOpen(false);
+                    }
+                  }}
+                  placeholder="Search in this chat..."
+                  className="flex-1 bg-transparent text-[13px] text-[#E9EDEF] placeholder-[#8696A0] outline-none"
+                />
+                <span className="text-[11px] text-[#8696A0] tabular-nums shrink-0 min-w-[56px] text-right">
+                  {inlineSearchMatches.length
+                    ? `${inlineMatchIndex + 1} of ${inlineSearchMatches.length}`
+                    : (inlineSearchQuery.trim() || inlineSearchStarred || inlineSearchCategory !== 'all' ? 'No results' : '')}
+                </span>
+                <button
+                  disabled={!inlineSearchMatches.length}
+                  onClick={() => goToInlineMatch(inlineMatchIndex - 1)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8696A0] enabled:hover:text-[#E9EDEF] enabled:hover:bg-[#2A3942] disabled:opacity-30 cursor-pointer disabled:cursor-default transition-colors"
+                  title="Previous match"
+                >
+                  <FiChevronUp size={16} />
+                </button>
+                <button
+                  disabled={!inlineSearchMatches.length}
+                  onClick={() => goToInlineMatch(inlineMatchIndex + 1)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8696A0] enabled:hover:text-[#E9EDEF] enabled:hover:bg-[#2A3942] disabled:opacity-30 cursor-pointer disabled:cursor-default transition-colors"
+                  title="Next match"
+                >
+                  <FiChevronDown size={16} />
+                </button>
+                <button
+                  onClick={() => {
+                    setInlineSearchOpen(false);
+                    setInlineSearchQuery('');
+                    setInlineSearchCategory('all');
+                    setInlineSearchStarred(false);
+                  }}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8696A0] hover:text-[#E9EDEF] hover:bg-[#2A3942] cursor-pointer transition-colors"
+                  title="Close search"
+                >
+                  <FiX size={16} />
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {SEARCH_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setInlineSearchCategory(cat.id)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition-colors ${
+                      inlineSearchCategory === cat.id
+                        ? 'bg-[#2563EB] text-white'
+                        : 'bg-[#2A3942] text-[#8696A0] hover:text-[#E9EDEF]'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setInlineSearchStarred((v) => !v)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition-colors flex items-center gap-1 ${
+                    inlineSearchStarred
+                      ? 'bg-amber-500 text-white'
+                      : 'bg-[#2A3942] text-[#8696A0] hover:text-[#E9EDEF]'
+                  }`}
+                >
+                  <FiStar size={11} className={inlineSearchStarred ? 'fill-current' : ''} /> Starred
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Pinned Message Banner */}
-          {pinnedMessageState[selectedChat.id] && (
+          {(() => {
+            const pinnedMsg = selectedChat.pinnedMessageId
+              ? (selectedChat.messages || []).find(m => (m.id || m._id) === selectedChat.pinnedMessageId)
+              : null;
+            if (!selectedChat.pinnedMessageId) return null;
+            return (
         <div className="bg-[#202C33]/95 backdrop-blur border-b border-white/5 py-2.5 px-5 flex justify-between items-center z-10 text-[13px] text-[#E9EDEF] select-none">
           <div className="flex items-center gap-2 truncate">
             <span className="text-[#2563EB] font-bold">📌 Pinned message:</span>
-            <span className="truncate italic text-[#8696A0]">{pinnedMessageState[selectedChat.id].text || `[${pinnedMessageState[selectedChat.id].type || 'file'}]`}</span>
+            <span className="truncate italic text-[#8696A0]">{pinnedMsg ? (pinnedMsg.text || `[${pinnedMsg.type || 'file'}]`) : 'Message unavailable'}</span>
           </div>
-          <button 
-            onClick={() => {
-              toast.success('Navigated to pinned message');
-            }}
-            className="text-[12px] text-[#2563EB] font-semibold cursor-pointer hover:underline shrink-0"
-          >
-            View
-          </button>
+          <div className="flex items-center gap-3 shrink-0">
+            {pinnedMsg && (
+              <button
+                onClick={() => highlightMessage(selectedChat.pinnedMessageId)}
+                className="text-[12px] text-[#2563EB] font-semibold cursor-pointer hover:underline"
+              >
+                View
+              </button>
+            )}
+            <button
+              onClick={() => pinMessage(selectedChat.id, null)}
+              className="text-[#8696A0] hover:text-white cursor-pointer transition-colors"
+              title="Unpin message"
+            >
+              <FiX size={15} />
+            </button>
+          </div>
         </div>
-      )}
+            );
+          })()}
 
       {/* 2. Messages List viewport */}
       {(selectedChat?.messages || []).length === 0 ? (
@@ -2041,13 +2187,9 @@ const isTyping = selectedChat && typingStatus?.[selectedChat.id] && Object.value
                       >
                         <FiSmile size={11} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => {
-                          setPinnedMessageState(prev => ({
-                            ...prev,
-                            [selectedChat.id]: msg
-                          }));
-                          toast.success('Message pinned to conversation', { icon: '📌' });
+                          pinMessage(selectedChat.id, msg.id || msg._id);
                         }}
                         className="p-1 text-slate-400 hover:text-white cursor-pointer hover:bg-white/5 rounded"
                         title="Pin Message"
@@ -2608,10 +2750,9 @@ const isTyping = selectedChat && typingStatus?.[selectedChat.id] && Object.value
           >
             <FiShare2 size={13} className="text-blue-400" /> Forward
           </button>
-          <button 
+          <button
             onClick={() => {
-              setPinnedMessageState(prev => ({ ...prev, [selectedChat.id]: contextMenuMsg }));
-              toast.success('Message pinned to conversation', { icon: '📌' });
+              pinMessage(selectedChat.id, contextMenuMsg.id || contextMenuMsg._id);
               setContextMenuMsg(null);
             }}
             className="w-full text-left py-2 px-3 hover:bg-white/[0.03] rounded-lg text-xs text-slate-300 font-semibold flex items-center gap-2.5 transition-colors cursor-pointer"

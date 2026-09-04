@@ -232,7 +232,7 @@ const NavSidebar = () => {
                   setActiveTab('profile');
                   setShowProfileMenu(false);
                 }}
-                className="w-full text-left py-2 px-3 hover:bg-slate-100 dark:hover:bg-[#2A3942]/60 rounded-lg text-[13px] text-black dark:text-white font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+                className="w-full text-left py-2 px-3 hover:bg-slate-100 dark:hover:bg-[#2A3942]/60 rounded-lg text-[13px] text-black font-semibold flex items-center gap-2 transition-colors cursor-pointer"
               >
                 <FiUser size={16} className="text-[#2563EB]" /> View Profile
               </button>
@@ -242,7 +242,7 @@ const NavSidebar = () => {
                   setActiveTab('settings');
                   setShowProfileMenu(false);
                 }}
-                className="w-full text-left py-2 px-3 hover:bg-slate-100 dark:hover:bg-[#2A3942]/60 rounded-lg text-[13px] text-black dark:text-white font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+                className="w-full text-left py-2 px-3 hover:bg-slate-100 dark:hover:bg-[#2A3942]/60 rounded-lg text-[13px] text-black font-semibold flex items-center gap-2 transition-colors cursor-pointer"
               >
                 <FiSettings size={16} className="text-blue-400" /> Settings
               </button>
@@ -252,7 +252,7 @@ const NavSidebar = () => {
                   setActiveTab('settings');
                   setShowProfileMenu(false);
                 }}
-                className="w-full text-left py-2 px-3 hover:bg-slate-100 dark:hover:bg-[#2A3942]/60 rounded-lg text-[13px] text-black dark:text-white font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+                className="w-full text-left py-2 px-3 hover:bg-slate-100 dark:hover:bg-[#2A3942]/60 rounded-lg text-[13px] text-black font-semibold flex items-center gap-2 transition-colors cursor-pointer"
               >
                 <FiHelpCircle size={16} className="text-blue-400" /> Help & Support
               </button>
@@ -262,7 +262,7 @@ const NavSidebar = () => {
                     lockAppManual();
                     setShowProfileMenu(false);
                   }}
-                  className="w-full text-left py-2 px-3 hover:bg-slate-100 dark:hover:bg-[#2A3942]/60 rounded-lg text-[13px] text-black dark:text-white font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+                  className="w-full text-left py-2 px-3 hover:bg-slate-100 dark:hover:bg-[#2A3942]/60 rounded-lg text-[13px] text-black font-semibold flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <FiLock size={16} className="text-blue-400" /> Lock Terminal
                 </button>
@@ -273,9 +273,9 @@ const NavSidebar = () => {
                   logout();
                   setShowProfileMenu(false);
                 }}
-                className="w-full text-left py-2 px-3 hover:bg-blue-500/10 rounded-lg text-[13px] text-black dark:text-white font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+                className="w-full text-left py-2 px-3 hover:bg-blue-500/10 rounded-lg text-[13px] text-black font-semibold flex items-center gap-2 transition-colors cursor-pointer"
               >
-                <FiLogOut size={16} className="text-black dark:text-white" /> Disconnect
+                <FiLogOut size={16} className="text-black" /> Disconnect
               </button>
             </div>
           )}

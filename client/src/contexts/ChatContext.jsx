@@ -182,6 +182,7 @@ export const ChatProvider = ({ children }) => {
               pinned: convo.pinnedBy?.includes(userRef.current?._id) || false,
               favorite: convo.favoritedBy?.includes(userRef.current?._id) || false,
               archived: convo.archivedBy?.includes(userRef.current?._id) || false,
+              pinnedMessageId: convo.pinnedMessageId || null,
               messages: convo.messages || []
             };
 
@@ -434,6 +435,10 @@ export const ChatProvider = ({ children }) => {
       }));
     };
 
+    const handleMessagePinned = ({ chatId, pinnedMessageId }) => {
+      setChats(prev => prev.map(c => c.id === chatId ? { ...c, pinnedMessageId: pinnedMessageId || null } : c));
+    };
+
     const handleMessageEdited = ({ chatId, message }) => {
       setChats(prev => prev.map(c => {
         if (c.id === chatId) {
@@ -564,6 +569,7 @@ export const ChatProvider = ({ children }) => {
     const unsubDelete = mockSocket.on('conversation_deleted', handleConversationDeleted);
     const unsubMsgDeleted = mockSocket.on('message_deleted', handleMessageDeleted);
     const unsubReaction = mockSocket.on('message_reaction_updated', handleMessageReactionUpdated);
+    const unsubMsgPinned = mockSocket.on('message_pinned', handleMessagePinned);
     const unsubMsgEdited = mockSocket.on('message_edited', handleMessageEdited);
     const unsubPollUpdated = mockSocket.on('poll_updated', handlePollUpdated);
     const unsubMsgOpened = mockSocket.on('message_opened', handleMessageOpened);
@@ -733,6 +739,7 @@ export const ChatProvider = ({ children }) => {
       unsubDelete();
       unsubMsgDeleted();
       unsubReaction();
+      unsubMsgPinned();
       unsubMsgEdited();
       unsubPollUpdated();
       unsubMsgOpened();
@@ -1228,6 +1235,18 @@ export const ChatProvider = ({ children }) => {
         return c;
       }));
       toast.success('Star updated locally', { icon: '⭐' });
+    }
+  };
+
+  const pinMessage = async (chatId, messageId) => {
+    // Optimistic update (messageId null => unpin)
+    setChats(prev => prev.map(c => c.id === chatId ? { ...c, pinnedMessageId: messageId || null } : c));
+    try {
+      await axios.post(`/api/chats/${chatId}/pin-message`, { messageId: messageId || null });
+      toast.success(messageId ? 'Message pinned to conversation' : 'Message unpinned', { icon: '📌' });
+    } catch (err) {
+      console.error('Failed to pin message:', err);
+      toast.success(messageId ? 'Message pinned locally' : 'Message unpinned locally', { icon: '📌' });
     }
   };
 
@@ -2451,6 +2470,7 @@ export const ChatProvider = ({ children }) => {
       addReaction,
       votePoll,
       toggleStarMessage,
+      pinMessage,
       setChatDisappearing,
       togglePinChat,
       toggleFavoriteChat,
